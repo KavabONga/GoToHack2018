@@ -1,3 +1,5 @@
+import scala.collection.mutable.ListBuffer
+import scala.io.StdIn._
 object fillForm {
   def formFill() = {
     println("Заполните анкету: введитите 1, если вы приветсттвуете это во взаимооттношениях/итересуетесь этим, и 0, если нет")

@@ -1,5 +1,6 @@
-package Nums
+package MyCiphering
 import collection.mutable
+import scala.annotation.tailrec
 import scala.util.Random
 
 object Primer {
@@ -26,7 +27,6 @@ object Primer {
     l.to[Array]
   }
   val primes = eratFill(100000).zipWithIndex.filter(p => p._1).map(p => p._2).drop(5000)
-  println(primes.mkString(","))
   val rand = new Random(112)
   def nextPrime() = primes((rand.nextInt() % primes.length).abs)
   def gcd(x : BigInt, y : BigInt): BigInt = {
@@ -44,6 +44,7 @@ object Primer {
       getPQ
   }
   def binPowMod(x : BigInt, n : BigInt, m : BigInt): BigInt = {
+    //println(n)
     if (n == 0) 1
     else {
       if (n % 2 == 0) {
@@ -95,28 +96,43 @@ object Paillier {
     ((((Primer.binPowMod(c, k.l, k.n * k.n) - 1) / k.n) * k.u) % k.n + k.n) % k.n
 }
 
-case class EncryptedVector(l : Array[Int])
+case class EncryptedVector(l : Array[BigInt], s : Int, publicKey: PublicKey)
+case class RS(R : Array[BigInt], R1 : Array[BigInt], S : BigInt, S1 : BigInt, s : Int)
 
 object SafeScalar {
   val rand = new Random(789)
-  def encryptVector(ar : Array[BigInt], publicKey: PublicKey) =
-    ar.map(x => Paillier.encrypt(publicKey, x))
-  def computeRS(encAr : Array[BigInt], publicKey: PublicKey) = {
-    val pi1 = rand.shuffle(encAr.indices)
+  def encryptVector(a : Array[BigInt], publicKey: PublicKey) = {
+    val s = rand.nextInt().abs % 100 + 100
+    EncryptedVector(a.map(x => Paillier.encrypt(publicKey, x + s)), s, publicKey)
+  }
+  def computeRS(encAr : EncryptedVector, b : Array[BigInt]) = {
+    val pi = rand.shuffle(encAr.l.indices.toList)
+    val pi1 = rand.shuffle(encAr.l.indices.toList)
+    val r = List.fill(encAr.l.length)(rand.nextInt() % 100)
+    val R = encAr.l.indices.toArray.map(i => encAr.l(pi(i)) * Paillier.encrypt(encAr.publicKey, encAr.s - r(pi(i)) - b(pi(i))))
+    val R1 = encAr.l.indices.toArray.map(i => encAr.l(pi1(i)) * Paillier.encrypt(encAr.publicKey, encAr.s - r(pi1(i))))
+    val S = Paillier.encrypt(encAr.publicKey, encAr.l.indices.map(i => (r(i) + b(i)) * (r(i) + b(i))).sum)
+    val S1 = Paillier.encrypt(encAr.publicKey, r.map(x => x * x).sum)
+    RS(R, R1, S, S1, encAr.s)
+  }
+  def decryptRS(rs : RS, privateKey: PrivateKey, a : Array[BigInt]) = {
+    val T = a.map(x => x * x).sum
+    val U = -rs.R.map(x => Paillier.decrypt(privateKey, x) - 2 * rs.s).map(x => x * x).sum
+    val U1 = -rs.R1.map(x => Paillier.decrypt(privateKey, x) - 2 * rs.s).map(x => x * x).sum
+    val P = Paillier.decrypt(privateKey, rs.S) + T + U
+    val P1 = Paillier.decrypt(privateKey, rs.S1) + T + U1
+    (P - P1) / 2
   }
 }
 
 object NumTester extends App {
   val keys = Paillier.generateKeys()
-  println(keys.privateKey)
-  println(keys.publicKey)
-  val m = 17823
-  val t = 731928
-  println(m)
-  println(t)
-  val cipheredM = Paillier.encrypt(keys.publicKey, m)
-  val cipheredT = Paillier.encrypt(keys.publicKey, t)
-  println(Paillier.decrypt(keys.privateKey, cipheredM))
-  println(Paillier.decrypt(keys.privateKey, cipheredT))
-  println(Paillier.decrypt(keys.privateKey, cipheredM * cipheredT))
+  println("Private key: " + keys.privateKey.toString)
+  println("Public key: " + keys.publicKey.toString)
+  val a = Array(0, 1, 1, 1, 0).map(BigInt(_))
+  val b = Array(1, 0, 1, 1, 0).map(BigInt(_))
+  val enc = SafeScalar.encryptVector(a, keys.publicKey)
+  val compRS = SafeScalar.computeRS(enc, b)
+  val scalarRes = SafeScalar.decryptRS(compRS, keys.privateKey, a)
+  println(scalarRes)
 }

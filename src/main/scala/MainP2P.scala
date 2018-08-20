@@ -1,3 +1,5 @@
+import java.net._
+
 import org.json4s.jackson.JsonMethods.{compact, parse, render}
 import org.json4s.JsonDSL._
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
@@ -6,6 +8,8 @@ import akka.http.scaladsl.{Http, server}
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
+import akka.http.scaladsl.server.Directives
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 
 import scala.xml._
 import scala.xml.Utility.trim
@@ -14,20 +18,22 @@ import scala.util._
 import akka.http.javadsl.model
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import org.json4s.JsonAST._
+import spray.json._
 
 import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
-import scala.concurrent.duration.Duration._
-import scala.concurrent.ExecutionContext.Implicits.global
-import collection.mutable
-import scala.xml.Utility._
-import scala.xml._
+import MyCiphering._
+import org.json4s.DefaultFormats
+import spray.json.DefaultJsonProtocol
 import akka.pattern._
+
+import scala.concurrent.duration.{Duration, MILLISECONDS}
+import akka.actor._
+
+import scala.concurrent.duration._
+import scala.concurrent.duration
+import collection.mutable
+import Jsoner._
 import akka.util.Timeout
-import java.net._
-
-import Jsoner.Jsoner
-
 object HttpReq{
   def get(url: String,
               connectTimeout: Int = 5000,
@@ -61,52 +67,60 @@ object HttpReq{
   }
 }
 
-object KeyHandler {
-  def privateKey(id : String) = {
-    "42"
-  }
-  def publicKey(id : String) = {
-    "23"
-  }
-  def generatePair(id : String) = ???
+case object FindSomeone
+case class FoundSomeone(that : ActorRef)
+
+case class TryMatch(enc : EncryptedVector)
+
+object TinderActor {
+  def props(interests : Array[Boolean], finder : ActorRef) =
+    Props(classOf[TinderActor], interests, finder)
 }
 
-object Cipherer {
-  def decryptMessage(message : String, from : String) = {
-    val keyToUse = KeyHandler.privateKey(from)
-    message
+class TinderActor(interests : Array[Boolean], finder : ActorRef) extends Actor with ActorLogging {
+  val openKeys = mutable.Map[ActorRef, PublicKey]()
+  val closeKeys = mutable.Map[ActorRef, PrivateKey]()
+  def interestsToBigInt = interests.map(x => if(x) BigInt(1) else BigInt(0))
+  implicit val timeout = Timeout(1 second)
+  override def receive: Receive = {
+    case FoundSomeone(that) => {
+      val keys = Paillier.generateKeys()
+      openKeys.update(that, keys.publicKey)
+      closeKeys.update(that, keys.privateKey)
+      log.info("Отправляю запрос")
+      val rsFuture = that ? TryMatch(SafeScalar.encryptVector(interestsToBigInt, keys.publicKey))
+      Try(Await.result(rsFuture, 1 second)) match {
+        case Success(rsAny) => {
+          rsAny match {
+            case rs : RS => {
+              val matching = SafeScalar.decryptRS(rs, closeKeys(that), interestsToBigInt)
+              log.info(s"Ваш процент совпадения - ${matching.toDouble / interests.length * 100}%")
+            }
+            case _ => log.info("Оно ответило чем-то не тем")
+          }
+        }
+        case Failure(exception) => log.info(s"Оно не ответило: ${exception.getMessage}")
+      }
+    }
+    case TryMatch(enc) => {
+      val rs = SafeScalar.computeRS(enc, interestsToBigInt)
+      sender ! rs
+    }
   }
-  def cryptMessage(message : String, to : String) = {
-    val keyToUse = KeyHandler.publicKey(to)
-    message
+}
+
+class TinderFinder() extends Actor with ActorLogging{
+  override def receive: Receive = {
+    case x => log.info(x.toString)
   }
 }
 
 object Main extends App {
-  def locals(from: Int, to: Int, ipAddress : List[Int]): List[List[Int]] = {
-    if (from > to) List()
-    else
-      ipAddress.updated(3, from) :: locals(from + 1, to, ipAddress)
-  }
   implicit val system = ActorSystem("my-system")
   implicit val dispatcher = system.dispatcher
   implicit val materializer = ActorMaterializer()
-  val localIpAddress = InetAddress.getLocalHost.getAddress.map(b => (b.toInt + 256) % 256).toList
-  val route =
-    pathPrefix("askForKey") {
-      pathEnd {
-        complete(HttpEntity(ContentTypes.`application/json`, s"""{"key":${KeyHandler.privateKey("someone")}"""))
-      }
-    } ~
-      pathPrefix("findSomeone") {
-        pathEnd {
-          val allLocals = locals(0, 255, localIpAddress).map(l => l.mkString("http://", ".", "/askForKey"))
-          val allReqs = allLocals.map(l => Future {HttpReq.get(l)})
-          complete("")
-        }
-      }
-  val bindingFuture = Http().bindAndHandle(route, "localhost", 8080)
-  println(localIpAddress.mkString("http://", ".", "/askForKey"))
-  println(InetAddress.getLocalHost.getHostAddress)
-  //println(HttpReq.get(localIpAddress.mkString("http://", ".", ":8080/askForKey")))
+  val finder = system.actorOf(Props(new TinderFinder))
+  val Masha = system.actorOf(TinderActor.props(Array(false, true, false, true), finder), "Masha")
+  val Vasya = system.actorOf(TinderActor.props(Array(false, true, true, false), finder), "Vasya")
+  Masha ! FoundSomeone(Vasya)
 }
