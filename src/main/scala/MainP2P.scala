@@ -6,9 +6,6 @@ import akka.http.scaladsl.{Http, server}
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
-import org.json4s.{DefaultFormats, JsonDSL}
-import org.json4s.jackson.{Json, JsonMethods}
-import JsonMethods._
 
 import scala.xml._
 import scala.xml.Utility.trim
@@ -18,7 +15,7 @@ import akka.http.javadsl.model
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import org.json4s.JsonAST._
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.concurrent.duration.Duration._
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -27,8 +24,9 @@ import scala.xml.Utility._
 import scala.xml._
 import akka.pattern._
 import akka.util.Timeout
-import Paillier.Paillier
 import java.net._
+
+import Jsoner.Jsoner
 
 object HttpReq{
   def get(url: String,
@@ -63,25 +61,52 @@ object HttpReq{
   }
 }
 
+object KeyHandler {
+  def privateKey(id : String) = {
+    "42"
+  }
+  def publicKey(id : String) = {
+    "23"
+  }
+  def generatePair(id : String) = ???
+}
+
+object Cipherer {
+  def decryptMessage(message : String, from : String) = {
+    val keyToUse = KeyHandler.privateKey(from)
+    message
+  }
+  def cryptMessage(message : String, to : String) = {
+    val keyToUse = KeyHandler.publicKey(to)
+    message
+  }
+}
 
 object Main extends App {
-  def locals(from: Int, to: Int, ipAddress : Array[Byte]): List[Array[Byte]] = {
+  def locals(from: Int, to: Int, ipAddress : List[Int]): List[List[Int]] = {
     if (from > to) List()
     else
-      ipAddress.updated(3, from.toByte) :: locals(from + 1, to, ipAddress)
+      ipAddress.updated(3, from) :: locals(from + 1, to, ipAddress)
   }
   implicit val system = ActorSystem("my-system")
   implicit val dispatcher = system.dispatcher
   implicit val materializer = ActorMaterializer()
-  val localIpAddress = InetAddress.getLocalHost.getAddress
+  val localIpAddress = InetAddress.getLocalHost.getAddress.map(b => (b.toInt + 256) % 256).toList
   val route =
     pathPrefix("askForKey") {
       pathEnd {
-        val localAdresses = locals(1, 20, localIpAddress)
-        complete(localAdresses.map(ip => ip.mkString(".")).mkString("\n"))
+        complete(HttpEntity(ContentTypes.`application/json`, s"""{"key":${KeyHandler.privateKey("someone")}"""))
       }
-    }
-
+    } ~
+      pathPrefix("findSomeone") {
+        pathEnd {
+          val allLocals = locals(0, 255, localIpAddress).map(l => l.mkString("http://", ".", "/askForKey"))
+          val allReqs = allLocals.map(l => Future {HttpReq.get(l)})
+          complete("")
+        }
+      }
   val bindingFuture = Http().bindAndHandle(route, "localhost", 8080)
-  println(HttpReq.get(localIpAddress.mkString("http://", ".", "/askForKey")))
+  println(localIpAddress.mkString("http://", ".", "/askForKey"))
+  println(InetAddress.getLocalHost.getHostAddress)
+  //println(HttpReq.get(localIpAddress.mkString("http://", ".", ":8080/askForKey")))
 }
