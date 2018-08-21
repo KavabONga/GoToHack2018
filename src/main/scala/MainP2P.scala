@@ -1,39 +1,18 @@
-import java.net._
-
-import org.json4s.jackson.JsonMethods.{compact, parse, render}
-import org.json4s.JsonDSL._
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
-import akka.http.scaladsl.server.{Route, StandardRoute}
-import akka.http.scaladsl.{Http, server}
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
-import akka.http.scaladsl.server.Directives
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
-
-import scala.xml._
-import scala.xml.Utility.trim
-import scala.io.StdIn
 import scala.util._
-import akka.http.javadsl.model
-import akka.http.scaladsl.unmarshalling.Unmarshal
-import org.json4s.JsonAST._
-import spray.json._
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent._
 import MyCiphering._
-import org.json4s.DefaultFormats
-import spray.json.DefaultJsonProtocol
 import akka.pattern._
 
-import scala.concurrent.duration.{Duration, MILLISECONDS}
+import scala.concurrent.duration._
 import akka.actor._
 
 import scala.concurrent.duration._
-import scala.concurrent.duration
 import collection.mutable
-import Jsoner._
 import akka.util.Timeout
+import fillForm.formFill
 object HttpReq{
   def get(url: String,
               connectTimeout: Int = 5000,
@@ -103,6 +82,7 @@ class TinderActor(interests : Array[Boolean], finder : ActorRef) extends Actor w
       }
     }
     case TryMatch(enc) => {
+      log.info("Получил запрос на матчинг")
       val rs = SafeScalar.computeRS(enc, interestsToBigInt)
       sender ! rs
     }
@@ -120,7 +100,9 @@ object Main extends App {
   implicit val dispatcher = system.dispatcher
   implicit val materializer = ActorMaterializer()
   val finder = system.actorOf(Props(new TinderFinder))
-  val Masha = system.actorOf(TinderActor.props(Array(false, true, false, true), finder), "Masha")
-  val Vasya = system.actorOf(TinderActor.props(Array(false, true, true, false), finder), "Vasya")
+  val Masha = system.actorOf(TinderActor.props(formFill().toArray, finder), "Masha")
+  val vasyaInterests = Array.fill(14)(Random.nextBoolean())
+  println(vasyaInterests.mkString(","))
+  val Vasya = system.actorOf(TinderActor.props(vasyaInterests, finder), "Vasya")
   Masha ! FoundSomeone(Vasya)
 }
