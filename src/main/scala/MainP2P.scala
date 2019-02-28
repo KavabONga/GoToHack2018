@@ -1,10 +1,9 @@
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
-import akka.stream.ActorMaterializer
 import scala.util._
-
+import hack.ciphering._
 import scala.concurrent._
-import MyCiphering._
 import akka.pattern._
+import akka.stream.ActorMaterializer
 
 import scala.concurrent.duration._
 import akka.actor._
@@ -89,20 +88,23 @@ class TinderActor(interests : Array[Boolean], finder : ActorRef) extends Actor w
   }
 }
 
-class TinderFinder() extends Actor with ActorLogging{
+class TinderFinder() extends Actor with ActorLogging {
   override def receive: Receive = {
     case x => log.info(x.toString)
   }
 }
 
-object Main extends App {
-  implicit val system = ActorSystem("my-system")
-  implicit val dispatcher = system.dispatcher
-  implicit val materializer = ActorMaterializer()
-  val finder = system.actorOf(Props(new TinderFinder))
-  val Masha = system.actorOf(TinderActor.props(formFill().toArray, finder), "Masha")
-  val vasyaInterests = Array.fill(14)(Random.nextBoolean())
-  println(vasyaInterests.mkString(","))
-  val Vasya = system.actorOf(TinderActor.props(vasyaInterests, finder), "Vasya")
-  Masha ! FoundSomeone(Vasya)
+object Chat extends App {
+  override def main(args: Array[String]): Unit = {
+    implicit val system = ActorSystem("my-system")
+    implicit val dispatcher = system.dispatcher
+    implicit val materializer = ActorMaterializer()
+    val finder = system.actorOf(Props(new TinderFinder))
+    val Masha = system.actorOf(TinderActor.props(formFill().toArray, finder), "Masha")
+    val vasyaInterests = Array.fill(14)(Random.nextBoolean())
+    println(vasyaInterests.mkString(","))
+    val Vasya = system.actorOf(TinderActor.props(vasyaInterests, finder), "Vasya")
+    Masha ! FoundSomeone(Vasya)
+    system.terminate()
+  }
 }
