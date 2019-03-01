@@ -1,15 +1,15 @@
-package Jsoner
+package hack
 
 import hack.ciphering._
 import org.json4s._
 import org.json4s.native.Serialization
 
-object Jsoner {
+object JsonTransformer {
   implicit val formats = DefaultFormats
   def encryptedVectorToJson(enc: EncryptedVector) = {
-    val m = JObject(
+    val m = Map(
       "vec" -> enc.l,
-      "key" -> JObject(
+      "key" -> Map(
         "n" -> enc.publicKey.n,
         "g" -> enc.publicKey.g
       ),
@@ -18,14 +18,13 @@ object Jsoner {
     Serialization.write(m)
   }
   def RSToJson(rs : RS) = {
-    val m = JObject(
+    val m = Map(
       "S" -> rs.S,
       "R" -> rs.R,
       "S1" -> rs.S1,
       "R1" -> rs.R1,
       "s" -> rs.s
     )
-    m
     Serialization.write(m)
   }
 }
