@@ -1,28 +1,32 @@
 package hack
 
-import akka.actor.{Actor, ActorLogging, ActorRef, Props, ReceiveTimeout}
-import akka.util.Timeout
+import java.net.InetSocketAddress
+
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.util.ByteString
 import hack.ciphering._
 
-import scala.concurrent.duration._
 import scala.collection.mutable
-import scala.concurrent.Await
-import scala.util.{Failure, Success, Try}
+import scala.collection.mutable.ArrayBuffer
 
-case object FindSomeone
+case object NewUser
 case class FoundSomeone(that : ActorRef)
-
 case class TryMatch(enc : EncryptedVector)
 
-object TinderActor {
-  def props(interests : Array[Boolean], finder : ActorRef) =
-    Props(classOf[TinderActor], interests, finder)
+class TinderCentral extends Actor {
+  val users: ArrayBuffer[ActorRef] = ArrayBuffer.empty[ActorRef]
+  val server = context.actorOf(Props(classOf[TcpServer], new InetSocketAddress("local", 0)))
+  def receive = {
+    case MessageReceived(from, message) => {
+      users.foreach(_ ! FoundSomeone(from))
+      users.append(from)
+    }
+  }
 }
 
-class TinderActor(interests : Array[Boolean], finder : ActorRef) extends Actor with ActorLogging {
+class TinderUser(central: InetSocketAddress, interests : Array[Boolean]) extends Actor with ActorLogging {
   val openKeys = mutable.Map[ActorRef, PublicKey]()
-  val closeKeys = mutable.Map[ActorRef, PrivateKey]()
-  context.setReceiveTimeout(5 seconds)
+  val closedKeys = mutable.Map[ActorRef, PrivateKey]()
 
 
   def bigVec = interests.map(x => if(x) BigInt(1) else BigInt(0))
@@ -31,24 +35,18 @@ class TinderActor(interests : Array[Boolean], finder : ActorRef) extends Actor w
     case FoundSomeone(that) => {
       val keys = Paillier.generateKeys()
       openKeys.update(that, keys.publicKey)
-      closeKeys.update(that, keys.privateKey)
+      closedKeys.update(that, keys.privateKey)
       log.info("Отправляю запрос")
       that ! TryMatch(SafeScalar.encryptVector(bigVec, keys.publicKey))
     }
     case rs : RS => {
-      val matching = SafeScalar.decryptRS(rs, closeKeys(sender), bigVec)
+      val matching = SafeScalar.decryptRS(rs, closedKeys(sender), bigVec)
       log.info(s"Ваш процент совпадения - ${matching.toDouble / interests.length * 100}%")
     }
     case TryMatch(enc) => {
       log.info("Получил запрос на матчинг")
       val rs = SafeScalar.computeRS(enc, bigVec)
       sender ! rs
-    }
-  }
-}
-
-class TinderFinder() extends Actor with ActorLogging {
-  override def receive: Receive = {
-    case x => log.info(x.toString)
+    } 
   }
 }

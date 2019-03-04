@@ -5,64 +5,66 @@ import akka.io.{ IO, Tcp }
 import akka.util.ByteString
 import java.net.InetSocketAddress
 
-class TcpClient(remote: InetSocketAddress, listener: ActorRef) extends Actor {
+case class MessageReceived(from : ActorRef, message : Any)
+case class MessageSend(to: ActorRef, message : Any)
+
+class TcpClient(remote: InetSocketAddress, local: InetSocketAddress) extends Actor {
 
   import Tcp._
   import context.system
-
-  IO(Tcp) ! Connect(remote)
+  IO(Tcp) ! Connect(remote, Some(local))
 
   def receive = {
-    case CommandFailed(_: Connect) ⇒
-      listener ! "connect failed"
+    case c @ CommandFailed(_: Connect) ⇒
+      context.parent ! c
       context stop self
-    case c @ Connected(remote, local) ⇒
-      listener ! c
+    case c : Connected ⇒ {
+      context.parent ! c
       val connection = sender()
-      connection ! Register(self)
       context become {
-        case data: ByteString ⇒
-          connection ! Write(data)
-        case CommandFailed(w: Write) ⇒
-          // O/S buffer was full
-          listener ! "write failed"
-        case Received(data) ⇒
-          listener ! data
-        case "close" ⇒
-          connection ! Close
-        case _: ConnectionClosed ⇒
-          listener ! "connection closed"
+        case Received(data) => {
+          context.parent ! MessageReceived(connection, Serialization.deserialise(data))
+        }
+        case MessageSend(to, message) =>
+          if (connection == to)
+            connection ! Write(Serialization.serialise(message))
+          else
+            sender ! "Wrong connection"
+        case _: ConnectionClosed =>
           context stop self
       }
+    }
   }
 
 }
 
-class TcpServer extends Actor {
+class TcpServer(local : InetSocketAddress) extends Actor {
 
   import Tcp._
   import context.system
 
-  IO(Tcp) ! Bind(self, new InetSocketAddress("localhost", 0))
+  IO(Tcp) ! Bind(self, local)
 
   def receive = {
-    case b @ Bound(localAddress) ⇒
+    case b @ Bound(localAddress) ⇒ {
       context.parent ! b
+      context become {
+        case Connected(remote, local) =>
+          sender ! Register(self)
+        case Received(data) => {
+          context.parent ! MessageReceived(sender, Serialization.deserialise(data))
+        }
+        case MessageSend(to, message) =>
+          to ! Write(Serialization.serialise(message))
+        case _: ConnectionClosed =>
+          context stop self
+      }
+    }
 
     case CommandFailed(_: Bind) ⇒ context stop self
 
     case c @ Connected(remote, local) ⇒
-      val handler = context.actorOf(Props[TcpDataHandler])
       val connection = sender()
-      connection ! Register(handler)
-  }
 
-}
-
-class TcpDataHandler extends Actor {
-  import Tcp._
-  def receive = {
-    case Received(data) ⇒ sender() ! Write(data)
-    case PeerClosed     ⇒ context stop self
   }
 }

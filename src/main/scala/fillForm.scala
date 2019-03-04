@@ -7,18 +7,14 @@ import scala.io.Source
 
 object Form {
   def formFill(): Array[Boolean] = {
-    println(getClass.getResource(""))
     println("Заполните анкету: введите 1, если вы приветствуете это во взаимоотношениях/итересуетесь этим или 0, если нет")
-    val items = Source.fromInputStream(getClass.getClassLoader.getResourceAsStream("form.txt")).getLines()
-    val vect = ListBuffer[Boolean]()
-    items.foreach(subject => {
+    val items = Source.fromInputStream(getClass.getClassLoader.getResourceAsStream("form.txt")).getLines().toArray
+    println(items)
+    val vect = items.map(subject => {
       println(subject)
-      val inp = readLine()
-      vect += {Try(inp.toInt) match {
-        case Success(value) if value > 0 => true
-        case _ => false
-      }}
+      readLine() == "1"
     })
-    vect.toArray
+    println("Получил все ответы")
+    vect
   }
 }

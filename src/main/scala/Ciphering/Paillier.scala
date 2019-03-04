@@ -4,31 +4,14 @@ import scala.annotation.tailrec
 import scala.util.Random
 
 object Primer {
-  private def eratFalseFill(l : mutable.ArrayBuffer[Boolean], step : Long, x : Long): Unit = {
-    if (x >= l.length)
-      ()
-    else {
-      l(x.toInt) = false
-      eratFalseFill(l, step, x + step)
-    }
-  }
-  private def eratAllFill(l : mutable.ArrayBuffer[Boolean], x : Long = 2): Unit = {
-    if (x >= l.length) ()
-    else {
-      if (l(x.toInt))
-        eratFalseFill(l, x, x * x)
-      else ()
-      eratAllFill(l, x + 1)
-    }
-  }
-  private def eratFill(n : Long): Array[Boolean] = {
-    val l = List.fill((n + 1).toInt)(true).to[mutable.ArrayBuffer]
-    eratAllFill(l)
-    l.to[Array]
-  }
-  val primes = eratFill(100000).zipWithIndex.filter(p => p._1).map(p => p._2).drop(5000)
+  private def eratHelper(s : Stream[Int]): Stream[Int] = s.head #:: eratHelper(s.tail.filter(x => x % s.head != 0))
+
+  /** Lazy infinite sequence of prime numbers */
+  def erat: Stream[Int] = eratHelper(Stream.from(2))
+
+  val primes = erat.slice(500, 1000)
   val rand = new Random(112)
-  def nextPrime() = primes((rand.nextInt() % primes.length).abs)
+  def nextPrime() = primes(rand.nextInt().abs % primes.length)
   def gcd(x : BigInt, y : BigInt): BigInt = {
     if (y == 0) x
     else gcd(y, x % y)
@@ -37,7 +20,7 @@ object Primer {
   def getPQ: (BigInt, BigInt) = {
     val p = nextPrime()
     val q = nextPrime()
-    if (gcd(p * q, (p - 1) * (q - 1)) == 1) {
+    if (gcd(p * q, (p - 1) * (q - 1)) == 1 && p != q) {
       (p, q)
     }
     else

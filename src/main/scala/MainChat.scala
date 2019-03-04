@@ -1,9 +1,11 @@
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
-import scala.util._
 
+import scala.util._
 import hack._
 import akka.stream.ActorMaterializer
 import akka.actor._
+
+import scala.concurrent.ExecutionContextExecutor
 
 object HttpReq{
   def get(url: String,
@@ -42,15 +44,14 @@ object HttpReq{
 
 object Chat extends App {
   override def main(args: Array[String]): Unit = {
-    implicit val system = ActorSystem("my-system")
-    implicit val dispatcher = system.dispatcher
-    implicit val materializer = ActorMaterializer()
-    val finder = system.actorOf(Props(new TinderFinder))
+    implicit val system: ActorSystem = ActorSystem("my-system")
+    implicit val materializer: ActorMaterializer = ActorMaterializer()
     val results = Form.formFill()
-    val Masha = system.actorOf(TinderActor.props(results, finder), "Masha")
+    val Masha = system.actorOf(Props(classOf[TinderUser], results), "Masha")
     val vasyaInterests = (1 to results.length).map(_ => Random.nextBoolean()).toArray
     println(vasyaInterests.mkString(","))
-    val Vasya = system.actorOf(TinderActor.props(vasyaInterests, finder), "Vasya")
+    val Vasya = system.actorOf(Props(classOf[TinderUser], vasyaInterests), "Vasya")
+    println
     Masha ! FoundSomeone(Vasya)
   }
 }
