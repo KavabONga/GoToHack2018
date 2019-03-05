@@ -21,6 +21,7 @@ class TinderCentral extends Actor {
       users.foreach(_ ! FoundSomeone(from))
       users.append(from)
     }
+    case ConnectionClosed
   }
 }
 

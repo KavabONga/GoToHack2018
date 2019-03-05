@@ -8,6 +8,11 @@ import java.net.InetSocketAddress
 case class MessageReceived(from : ActorRef, message : Any)
 case class MessageSend(to: ActorRef, message : Any)
 
+/**
+  * A simplicstic Actor for initiating TCP connections
+  *
+  * Deserialises all the incoming data to Scala objects and sends to the parent
+  */
 class TcpClient(remote: InetSocketAddress, local: InetSocketAddress) extends Actor {
 
   import Tcp._
@@ -30,8 +35,10 @@ class TcpClient(remote: InetSocketAddress, local: InetSocketAddress) extends Act
             connection ! Write(Serialization.serialise(message))
           else
             sender ! "Wrong connection"
-        case _: ConnectionClosed =>
+        case c : ConnectionClosed => {
+          context.parent ! c
           context stop self
+        }
       }
     }
   }
@@ -56,8 +63,10 @@ class TcpServer(local : InetSocketAddress) extends Actor {
         }
         case MessageSend(to, message) =>
           to ! Write(Serialization.serialise(message))
-        case _: ConnectionClosed =>
+        case c: ConnectionClosed => {
+          context.parent ! c
           context stop self
+        }
       }
     }
 
