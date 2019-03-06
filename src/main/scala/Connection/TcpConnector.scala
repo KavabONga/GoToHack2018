@@ -1,12 +1,14 @@
 package hack
 
-import akka.actor.{ Actor, ActorRef, Props }
-import akka.io.{ IO, Tcp }
+import akka.actor.{Actor, ActorRef, Props}
+import akka.io.{IO, Tcp}
 import akka.util.ByteString
 import java.net.InetSocketAddress
 
-case class MessageReceived(from : ActorRef, message : Any)
-case class MessageSend(to: ActorRef, message : Any)
+import hack.common.{Connection, Serialization}
+
+case class MessageReceived(from : Connection, message : Any)
+case class MessageSend(to: Connection, message : Any)
 
 /**
   * A simplicstic Actor for initiating TCP connections
@@ -24,8 +26,8 @@ class TcpClient(remote: InetSocketAddress, local: InetSocketAddress) extends Act
       context.parent ! c
       context stop self
     case c : Connected ⇒ {
-      context.parent ! c
-      val connection = sender()
+      context.parent ! MessageReceived(sender, c)
+      val connection = sender
       context become {
         case Received(data) => {
           context.parent ! MessageReceived(connection, Serialization.deserialise(data))
@@ -36,13 +38,17 @@ class TcpClient(remote: InetSocketAddress, local: InetSocketAddress) extends Act
           else
             sender ! "Wrong connection"
         case c : ConnectionClosed => {
-          context.parent ! c
+          context.parent ! MessageReceived(sender, c)
           context stop self
         }
       }
     }
   }
+}
 
+object TcpClient {
+  def props(remote: InetSocketAddress, local: InetSocketAddress) =
+    Props(classOf[TcpClient], remote, local)
 }
 
 class TcpServer(local : InetSocketAddress) extends Actor {
@@ -56,15 +62,17 @@ class TcpServer(local : InetSocketAddress) extends Actor {
     case b @ Bound(localAddress) ⇒ {
       context.parent ! b
       context become {
-        case Connected(remote, local) =>
+        case c : Connected => {
+          context.parent ! MessageReceived(sender, c)
           sender ! Register(self)
+        }
         case Received(data) => {
           context.parent ! MessageReceived(sender, Serialization.deserialise(data))
         }
         case MessageSend(to, message) =>
           to ! Write(Serialization.serialise(message))
         case c: ConnectionClosed => {
-          context.parent ! c
+          context.parent ! MessageReceived(sender, c)
           context stop self
         }
       }
@@ -76,4 +84,9 @@ class TcpServer(local : InetSocketAddress) extends Actor {
       val connection = sender()
 
   }
+}
+
+object TcpServer {
+  def props(local : InetSocketAddress) =
+    Props(classOf[TcpServer], local)
 }
