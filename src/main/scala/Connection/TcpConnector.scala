@@ -1,88 +1,121 @@
 package hack
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.io.{IO, Tcp}
 import akka.util.ByteString
 import java.net.InetSocketAddress
 
-import hack.common.{Connection, Serialization}
+import hack.common.{Serialization}
 
-case class MessageReceived(from : Connection, message : Any)
-case class MessageSend(to: Connection, message : Any)
+import scala.collection.mutable.ArrayBuffer
+
+case class MessageReceived(message : Any)
+case class MessageSend(message : Any)
+
+case class MessageReceivedFrom(from : ActorRef, message : Any)
+case class MessageSendTo(to : ActorRef, message : Any)
 
 /**
-  * A simplicstic Actor for initiating TCP connections
+  * A simplistic Actor for initiating TCP client connections
   *
   * Deserialises all the incoming data to Scala objects and sends to the parent
   */
-class TcpClient(remote: InetSocketAddress, local: InetSocketAddress) extends Actor {
+class TcpClient(remote: InetSocketAddress) extends Actor with ActorLogging {
 
   import Tcp._
   import context.system
-  IO(Tcp) ! Connect(remote, Some(local))
+  IO(Tcp) ! Connect(remote)
 
   def receive = {
-    case c @ CommandFailed(_: Connect) ⇒
-      context.parent ! c
+    case c @ CommandFailed(con : Connect) ⇒ {
+      log.info("Что-то провалилось")
       context stop self
-    case c : Connected ⇒ {
-      context.parent ! MessageReceived(sender, c)
+      context.parent ! MessageReceived(c)
+    }
+    case con @ Connected(remote, local) ⇒ {
+      log.info(s"Соединился с $remote")
+      context.parent ! MessageReceived(con)
       val connection = sender
+      connection ! Register(self)
       context become {
         case Received(data) => {
-          context.parent ! MessageReceived(connection, Serialization.deserialise(data))
+          log.info(s"Получил ${Serialization.deserialise(data)}")
+          context.parent ! MessageReceived(Serialization.deserialise(data))
         }
-        case MessageSend(to, message) =>
-          if (connection == to)
-            connection ! Write(Serialization.serialise(message))
-          else
-            sender ! "Wrong connection"
+        case MessageSend(message) => {
+          log.info(s"Отправляю $message")
+          connection ! Write(Serialization.serialise(message))
+        }
         case c : ConnectionClosed => {
-          context.parent ! MessageReceived(sender, c)
+          log.info(s"Закрываюсь, $c")
+          context.parent ! MessageReceived(c)
           context stop self
         }
+        case x =>
+          log.info(s"Получил что-то странное: $x")
       }
     }
+    case x =>
+      log.info(s"Получил что-то странное: $x")
   }
 }
 
 object TcpClient {
-  def props(remote: InetSocketAddress, local: InetSocketAddress) =
-    Props(classOf[TcpClient], remote, local)
+  def props(remote: InetSocketAddress) =
+    Props(classOf[TcpClient], remote)
 }
 
-class TcpServer(local : InetSocketAddress) extends Actor {
+/**
+  * A simplistic Actor for listening to TCP connections
+  *
+  * Deserialises all the incoming data to Scala objects and sends to the parent
+  * Sends the same message to all the clients it's connected to
+  */
+
+class TcpServer(local : InetSocketAddress) extends Actor with ActorLogging{
 
   import Tcp._
   import context.system
 
   IO(Tcp) ! Bind(self, local)
 
+  val connections = ArrayBuffer.empty[ActorRef]
+
   def receive = {
     case b @ Bound(localAddress) ⇒ {
-      context.parent ! b
+      context.parent ! MessageReceived(b)
       context become {
-        case c : Connected => {
-          context.parent ! MessageReceived(sender, c)
+        case c @ Connected(remote, _) => {
+          log.info(s"Соединился с $remote")
+          context.parent ! MessageReceivedFrom(sender, c)
           sender ! Register(self)
+          connections.append(sender)
         }
         case Received(data) => {
-          context.parent ! MessageReceived(sender, Serialization.deserialise(data))
+          log.info(s"Получил ${Serialization.deserialise(data)}")
+          context.parent ! MessageReceivedFrom(sender, Serialization.deserialise(data))
         }
-        case MessageSend(to, message) =>
+        case MessageSendTo(to, message) => {
+          log.info(s"Отправляю $message определённому $to")
           to ! Write(Serialization.serialise(message))
+        }
         case c: ConnectionClosed => {
-          context.parent ! MessageReceived(sender, c)
+          log.info(s"Закрываюсь, $c")
+          context.parent ! MessageReceived(c)
           context stop self
         }
+        case x =>
+          log.info(s"Получил что-то странное: $x")
       }
     }
 
-    case CommandFailed(_: Bind) ⇒ context stop self
-
-    case c @ Connected(remote, local) ⇒
-      val connection = sender()
-
+    case c @ CommandFailed(_: Bind) ⇒ {
+      log.info("Что-то провалилось")
+      context.parent ! MessageReceived(c)
+      context stop self
+    }
+    case x =>
+      log.info(s"Получил что-то странное: $x")
   }
 }
 

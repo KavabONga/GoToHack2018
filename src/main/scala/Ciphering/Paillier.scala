@@ -9,7 +9,7 @@ object Primer {
   /** Lazy infinite sequence of prime numbers */
   def erat: Stream[Int] = eratHelper(Stream.from(2))
 
-  val primes = erat.slice(500, 1000)
+  val primes = erat.take(200).drop(100)
   val rand = new Random(112)
   def nextPrime() = primes(rand.nextInt().abs % primes.length)
   def gcd(x : BigInt, y : BigInt): BigInt = {

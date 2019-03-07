@@ -1,3 +1,5 @@
+import java.net.InetSocketAddress
+
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props, Status}
 
 import scala.util._
@@ -7,51 +9,42 @@ import akka.actor._
 
 import scala.concurrent.ExecutionContextExecutor
 
-object HttpReq{
-  def get(url: String,
-              connectTimeout: Int = 5000,
-              readTimeout: Int = 5000) =
-  {
-    val requestMethod = "GET"
-    import java.net.{URL, HttpURLConnection}
-    val connection = new URL(url).openConnection.asInstanceOf[HttpURLConnection]
-    connection.setConnectTimeout(connectTimeout)
-    connection.setReadTimeout(readTimeout)
-    connection.setRequestMethod(requestMethod)
-    val inputStream = connection.getInputStream
-    val content = io.Source.fromInputStream(inputStream).mkString
-    if (inputStream != null) inputStream.close()
-    content
-  }
-  def post(url: String,
-          connectTimeout: Int = 5000,
-          readTimeout: Int = 5000) =
-  {
-    val requestMethod = "POST"
-    import java.net.{URL, HttpURLConnection}
-    val connection = new URL(url).openConnection.asInstanceOf[HttpURLConnection]
-    connection.setConnectTimeout(connectTimeout)
-    connection.setReadTimeout(readTimeout)
-    connection.setRequestMethod(requestMethod)
-    val inputStream = connection.getInputStream
-    val content = io.Source.fromInputStream(inputStream).mkString
-    if (inputStream != null) inputStream.close()
-    content
+case object MashaVasyaChat
+
+class ChatInitiator(implicit system : ActorSystem, materializer : ActorMaterializer) extends Actor {
+  import akka.io.Tcp._
+  override def receive = {
+    case MashaVasyaChat => {
+
+      val centralAddress = new InetSocketAddress(0)
+      println(s"Создаю сервер на $centralAddress...")
+      val central = context.actorOf(TinderCentral.props(centralAddress), "central")
+    }
+    case Bound(centralAddress) => {
+      println(s"Создал сервер на $centralAddress")
+      val results = (1 to 14).map(_ => Random.nextBoolean()).toArray //Form.formFill()
+      println("Создаю Машу...")
+      val Masha = context.actorOf(TinderUser.props(centralAddress, results), "Masha")
+      println("Создал Машу")
+      val vasyaInterests = (1 to results.length).map(_ => Random.nextBoolean()).toArray
+      println(vasyaInterests.mkString(","))
+      println("Создаю Васю...")
+      val Vasya = context.actorOf(TinderUser.props(centralAddress, vasyaInterests), "Vasya")
+      println("Создал Васю")
+    }
   }
 }
 
-
+object ChatInitiator {
+  def props(implicit system: ActorSystem, materializer: ActorMaterializer) =
+    Props(new ChatInitiator)
+}
 
 object Chat extends App {
   override def main(args: Array[String]): Unit = {
     implicit val system: ActorSystem = ActorSystem("my-system")
     implicit val materializer: ActorMaterializer = ActorMaterializer()
-    val results = Form.formFill()
-    val Masha = system.actorOf(Props(classOf[TinderUser], results), "Masha")
-    val vasyaInterests = (1 to results.length).map(_ => Random.nextBoolean()).toArray
-    println(vasyaInterests.mkString(","))
-    val Vasya = system.actorOf(Props(classOf[TinderUser], vasyaInterests), "Vasya")
-    println
-    Masha ! FoundSomeone(Vasya)
+    val chatter = system.actorOf(ChatInitiator.props)
+    chatter ! MashaVasyaChat
   }
 }

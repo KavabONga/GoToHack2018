@@ -5,7 +5,6 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, 
 import akka.actor.ActorRef
 import akka.util.ByteString
 object common {
-  type Connection = ActorRef
 
   object Serialization extends App {
     def serialise(value: Any) = {
