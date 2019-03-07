@@ -15,20 +15,19 @@ case class ContactMeHere(address : InetSocketAddress)
 
 class TinderCentral(address : InetSocketAddress) extends Actor with ActorLogging {
   import akka.io.Tcp._
-  val users = ArrayBuffer.empty[ActorRef]
   val server = context.actorOf(TcpServer.props(address), s"${self.path.name}Server")
+  val users = ArrayBuffer.empty[ActorRef]
   log.info(s"Я сервер и я лежу на $address")
   def receive = {
-    case MessageReceived(b : Bound) => {
+    // The server is bound to an address
+    case MessageReceived(_, b : Bound) => {
       log.info("Забаундил главный сервер")
       context.parent ! b
     }
-    case MessageReceivedFrom(from, Connected(remote, local)) => {
-      log.info(s"Узнал о новом юзвере на $remote")
-    }
-    case MessageReceivedFrom(from, ContactMeHere(address)) => {
-      log.info(s"Юзверь готов принимать матчинги. Отправляю известия о нём всем ${users.length} юзверям")
-      users.foreach(server ! MessageSendTo(_, FoundSomeone(address)))
+
+    // A user says he is ready to accept matches (So it just sends the FoundSomeone to every existing user)
+    case MessageReceived(from, ContactMeHere(address)) => {
+      users.foreach(server ! MessageSend(_, FoundSomeone(address)))
       users.append(from)
     }
     case x =>
@@ -44,44 +43,52 @@ object TinderCentral {
 class TinderUser(central: InetSocketAddress, interests : Array[Boolean]) extends Actor with ActorLogging {
   import akka.io.Tcp._
 
-  val openKeys = mutable.Map[ActorRef, PublicKey]()
-  val closedKeys = mutable.Map[ActorRef, PrivateKey]()
-  val serverAddress = new InetSocketAddress(0)
-  context.actorOf(TcpClient.props(central), s"${self.path.name}ToServer")
-  context.actorOf(TcpServer.props(new InetSocketAddress(0)))
-  log.info(s"Инициирую соединение с главным сервером ...")
   def bigVec = interests.map(x => if(x) BigInt(1) else BigInt(0))
 
+  val openKeys = mutable.Map[ActorRef, PublicKey]()
+  val closedKeys = mutable.Map[ActorRef, PrivateKey]()
+
+  val thisServer = context.actorOf(TcpServer.props(new InetSocketAddress(0)))
+  log.info(s"Мои интересы: ${interests.mkString("[", ", ", "]")}")
+
   override def receive = {
-    case MessageReceived(Bound(thisServer)) => {
-      log.info(s"Теперь я здесь: $thisServer")
+
+    // The user's server is ready, so he can start communicating
+    case MessageReceived(_, Bound(thisServerAddress)) => {
+      val toServer = context.actorOf(TcpClient.props(central), s"${self.path.name}ToServer")
+      log.info(s"Теперь я здесь: $thisServerAddress")
       context become {
-        case MessageReceived(FoundSomeone(that)) => {
+
+        // Got an notification that a new user appeared, should check for a match
+        case MessageReceived(from, FoundSomeone(that)) => {
           log.info(s"Создаю соединение... с $that")
           context.actorOf(TcpClient.props(that))
         }
-        case MessageReceived(Connected(c, _)) if c == central => {
-          log.info("Присоединился таки к главному серверу")
-          sender ! MessageSend(ContactMeHere(thisServer))
+
+        // The connection with the server is done
+        case MessageReceived(from, c : Connected) if sender == toServer => {
+          sender ! MessageSend(from, ContactMeHere(thisServerAddress))
         }
-        case MessageReceivedFrom(from, Connected(_, _)) => {
+
+        // When someone found you in order to match
+        case MessageReceived(from, Connected(_, local)) if sender == thisServer => {
           val keys = Paillier.generateKeys()
           openKeys.update(sender, keys.publicKey)
           closedKeys.update(sender, keys.privateKey)
           log.info("Отправляю запрос на матчинг")
-          sender ! MessageSendTo(from, TryMatch(SafeScalar.encryptVector(bigVec, keys.publicKey)))
+          sender ! MessageSend(from, TryMatch(SafeScalar.encryptVector(bigVec, keys.publicKey)))
         }
-        case MessageReceivedFrom(from, rs : RS) => {
+        case MessageReceived(from, rs : RS) => {
           val matching = SafeScalar.decryptRS(rs, closedKeys(sender), bigVec)
           log.info(s"Ваш процент совпадения - ${matching.toDouble / interests.length * 100}%")
-          sender ! Close
+          from ! Close
         }
-        case MessageReceived(TryMatch(enc)) => {
+        case MessageReceived(from, TryMatch(enc)) => {
           log.info("Получил запрос на матчинг")
           val rs = SafeScalar.computeRS(enc, bigVec)
-          sender ! MessageSend(rs)
+          sender ! MessageSend(from, rs)
         }
-        case MessageReceived(c : ConnectionClosed) => {
+        case MessageReceived(from, c : ConnectionClosed) => {
           log.info("Закрыл соединение")
           openKeys -= sender
           closedKeys -= sender
